@@ -1,0 +1,100 @@
+#!/opt/local/bin/ruby1.9
+require 'sinatra'
+require 'cairo'
+require 'pango'
+require 'bmix'
+
+def get_resized_font_size(surface, layout, font_name, font_size, font_min_size)
+  font_desired_size = font_size
+  fontdesc = Pango::FontDescription.new("#{font_name} #{font_size}")
+  layout.set_font_description fontdesc
+  while(layout.pixel_extents[1].width > surface.width \
+     || layout.pixel_extents[1].height > surface.height) do
+    font_size -= 1
+    fontdesc.set_size font_size * Pango::SCALE
+    layout.set_font_description fontdesc
+    if(font_size < font_min_size) then
+      # we can't render this much text big enough to be readable
+      # set the font size back to what we were given originally and give up
+      font_size = font_desired_size
+      fontdesc.set_size font_size * Pango::SCALE
+      layout.set_font_description fontdesc
+      return -1
+    end
+  end
+  font_size
+end
+
+def scroll_text(surface, ctx, layout, bmix)
+  left = 0
+  frame = 0
+  sleep_time = 0.025
+  step = 2
+  layout.set_width -1 # don't wrap if we're scrolling
+  scroll_seconds = (layout.pixel_extents[1].width + surface.width) / step * sleep_time
+  while(scroll_seconds > 8) do
+    scroll_seconds = (layout.pixel_extents[1].width + surface.width) / step * sleep_time
+    step += 1
+  end
+  puts "Expecting to scroll text for #{scroll_seconds} seconds using step #{step}."
+  while(layout.pixel_extents[1].width + left >= surface.width - 3) do
+    frame += 1
+    ctx.move_to left, 0
+    ctx.set_source_color(:black)
+    ctx.paint
+    ctx.set_source_color(:white)
+    ctx.show_pango_layout layout
+    bmix.send_frame surface
+    sleep 0.025
+    left -= step
+  end
+  return "Successfully rendered #{frame} frames of scrolling text."
+end
+
+get '/signservice/SignService' do
+  msg = params[:Message] || "Get Ready For A Whole Bunch of Ostriches and Cats"
+  wrap = params[:WrapMethod] || 'best'
+  font_name = params[:FontName] || "Sans"
+  font_size = params[:FontSize] || 12
+  font_min_size = params[:FontMinSize] || 6
+  bmix = Bmix::Sender.new("sign0.hacklab.to", 2324)
+
+  surface = Cairo::ImageSurface.new(Cairo::Format::ARGB32, 96, 32)
+  ctx = Cairo::Context.new(surface)
+  ctx.set_source_color(:white)
+
+  layout = ctx.create_pango_layout
+  layout.set_text(msg)
+  fontdesc = Pango::FontDescription.new("#{font_name} #{font_size}")
+  layout.set_font_description fontdesc
+  case wrap
+    when 'wrap'
+      layout.set_wrap(Pango::WRAP_WORD)
+    when 'resize'
+      layout.set_width surface.width * Pango::SCALE
+      font_size = get_resized_font_size(surface, layout, font_name, font_size, font_min_size)
+      if(font_size < 0) then
+        return "Unable to render #{msg.length} characters of text in a readable font."
+      end
+      fontdesc = Pango::FontDescription.new("#{font_name} #{font_size}")
+      layout.set_font_description fontdesc      
+    when 'best'
+      # try to resize the text to fit, if it won't fit then scroll it
+      layout.set_width surface.width * Pango::SCALE
+      font_size = get_resized_font_size(surface, layout, font_name, font_size, font_min_size)
+      if(font_size < 0) then
+        return scroll_text surface, ctx, layout, bmix
+      end
+      fontdesc = Pango::FontDescription.new("#{font_name} #{font_size}")
+      layout.set_font_description fontdesc      
+    when 'scroll'
+      return scroll_text surface, ctx, layout, bmix
+  end
+  layout.set_width surface.width * Pango::SCALE  
+  layout.set_alignment Pango::ALIGN_CENTER
+
+  ctx.show_pango_layout layout
+
+  bmix.send_frame surface
+  "Successfully rendered #{msg.length} characters to the sign in size #{font_size} using wrap method '#{wrap}'. Extents are #{layout.pixel_extents[1].width} x #{layout.pixel_extents[1].height}."
+end
