@@ -3,6 +3,9 @@ require 'sinatra'
 require 'cairo'
 require 'pango'
 require 'bmix'
+# set :port, 9494
+
+ALIGN={"center"=>Pango::ALIGN_CENTER,"left"=>Pango::ALIGN_LEFT,"right"=>Pango::ALIGN_RIGHT}
 
 def get_resized_font_size(surface, layout, font_name, font_size, font_min_size)
   font_desired_size = font_size
@@ -25,7 +28,7 @@ def get_resized_font_size(surface, layout, font_name, font_size, font_min_size)
   font_size
 end
 
-def scroll_text(surface, ctx, layout, bmix)
+def scroll_text(surface, ctx, layout, voffset, bmix)
   left = 0
   frame = 0
   sleep_time = 0.025
@@ -39,7 +42,7 @@ def scroll_text(surface, ctx, layout, bmix)
   puts "Expecting to scroll text for #{scroll_seconds} seconds using step #{step}."
   while(layout.pixel_extents[1].width + left >= surface.width - 3) do
     frame += 1
-    ctx.move_to left, 0
+    ctx.move_to left, voffset
     ctx.set_source_color(:black)
     ctx.paint
     ctx.set_source_color(:white)
@@ -55,15 +58,26 @@ get '/signservice/SignService' do
   msg = params[:Message] || "Get Ready For A Whole Bunch of Ostriches and Cats"
   wrap = params[:WrapMethod] || 'best'
   font_name = params[:FontName] || "Sans"
-  font_size = params[:FontSize] || 12
-  font_min_size = params[:FontMinSize] || 6
-  bmix = Bmix::Sender.new("sign0.hacklab.to", 2324)
+  font_size_str = params[:FontSize] || "12"
+  font_size = font_size_str.to_i
+  font_min_size_str = params[:FontMinSize] || "6"
+  font_min_size = font_min_size_str.to_i
+  alignment = ALIGN["center"]
+  text_align = params[:Align] || "center"
+  alignment = ALIGN[text_align] if ALIGN.has_key?text_align
+  port_str = params[:Port] || "2324"
+  port = port_str.to_i
+  voffset_str = params[:VOffset] || "0"
+  voffset = voffset_str.to_i
+  bmix = Bmix::Sender.new("sign0.hacklab.to",port)
 
   surface = Cairo::ImageSurface.new(Cairo::Format::ARGB32, 96, 32)
   ctx = Cairo::Context.new(surface)
   ctx.set_source_color(:white)
 
   layout = ctx.create_pango_layout
+  ctx.move_to 0,voffset
+  # puts "MSG: #{msg}"
   layout.set_text(msg)
   fontdesc = Pango::FontDescription.new("#{font_name} #{font_size}")
   layout.set_font_description fontdesc
@@ -83,15 +97,15 @@ get '/signservice/SignService' do
       layout.set_width surface.width * Pango::SCALE
       font_size = get_resized_font_size(surface, layout, font_name, font_size, font_min_size)
       if(font_size < 0) then
-        return scroll_text surface, ctx, layout, bmix
+        return scroll_text surface, ctx, layout, voffset, bmix
       end
       fontdesc = Pango::FontDescription.new("#{font_name} #{font_size}")
       layout.set_font_description fontdesc      
     when 'scroll'
-      return scroll_text surface, ctx, layout, bmix
+      return scroll_text surface, ctx, layout, voffset, bmix
   end
   layout.set_width surface.width * Pango::SCALE  
-  layout.set_alignment Pango::ALIGN_CENTER
+  layout.set_alignment alignment
 
   ctx.show_pango_layout layout
 
