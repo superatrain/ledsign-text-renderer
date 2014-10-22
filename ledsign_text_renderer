@@ -3,7 +3,9 @@ require 'sinatra'
 require 'cairo'
 require 'pango'
 require 'bmix'
-# set :port, 9494
+
+set :bind, '0.0.0.0'
+# set :port, 9494 # Alt port for dev
 
 ALIGN={"center"=>Pango::ALIGN_CENTER,"left"=>Pango::ALIGN_LEFT,"right"=>Pango::ALIGN_RIGHT}
 
